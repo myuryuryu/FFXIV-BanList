@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Insert title here</title>
+<style type="text/css">
+
+</style>
+</head>
+<body>
+
+<script  src = "https://ngld.github.io/OverlayPlugin/assets/shared/common.min.js"> </script>
+<script type="text/javascript">
+// 메뉴 
+
+const api_key = "api_key=14aa27c066ea7eb964dd5e28b9ca47f0";
+const partition11 = "metric=rdps&partition=11&timeframe=historical";
+const partition5 = "metric=rdps&partition=5&timeframe=historical";
+const fflogURL = "https://www.fflogs.com/v1/parses/character/"
+
+let overlap = [];
+
+let ftrText = ['닉네임', '서버', '1', '2', '3', '4', '신고'];
+let ftdWidth = ['40%', '20%', '7%', '7%', '7%', '7%', '12%'];
+let table = document.createElement("table");
+table.width = 250;
+table.id = "table";
+table.style.backgroundColor = "rgb(33,33,33)";
+table.style.color = "white";
+document.body.appendChild(table);
+
+let ftr = document.createElement('tr');
+table.appendChild(ftr);
+
+for(let i=0; i<7; i++){
+	let ftd = document.createElement('td');
+	ftd.innerText = ftrText[i];
+	ftd.width = ftdWidth[i];
+	ftd.style.fontSize = "12px";
+	ftd.style.magin = "0px auto";
+	ftd.style.textAlign = "center";
+	ftr.appendChild(ftd);
+}
+
+const index = [19,37,55,73,91,109,127,145]; // 파티원 정보 배열 index
+const check = "00"; // 닉네임 정보가 끝나면 00
+let resultNick = [];
+let resultServ = [];
+let resultFFlog = [];
+let recentData = [];
+
+
+function convert_to_serv(serv){
+	switch(serv){
+	case "081B":
+		return "Carbuncle";
+	case "081C":
+		return "Chocobo";
+	case "081D":
+		return "Moogle";
+	case "081E":
+		return "Tonberry";
+	
+	}
+}
+function serv_to_kr(serv){
+	switch(serv){
+	case "Carbuncle":
+		return "카벙클";
+	case "Chocobo":
+		return "초코보";
+	case "Moogle":
+		return "모그리";
+	case "Tonberry":
+		return "톤베리";
+	}
+}
+
+function spliceArr() {
+	let tableName = document.getElementById("table");
+	let trCount = document.getElementById("table").childElementCount;
+	
+	if(trCount > 1){
+		for(let i=1; i<trCount; i++){
+			tableName.removeChild(tableName.childNodes[1]);
+		}
+	}
+	
+	// 모든 요소 삭제
+	resultNick.splice(0, resultNick.length);
+	resultServ.splice(0, resultServ.length);
+}
+
+// 02630014
+// 
+
+addOverlayListener ( "LogLine" ,  (l)  =>  { // 로그 정보 읽어옴
+	const c = l.line;
+
+	// 내 파찾 해체
+	if(c[6] === "00B10014" && c[11] === "00008000") {
+		spliceArr();
+		recentData = [];
+	}
+	
+	
+	// 남의 파찾에서 탈퇴
+	if(c[10] === "3BD30DC2" && c[6] === "01480014") {
+		spliceArr();
+		recentData = [];
+	}
+	// 누군가 파찾에서 탈퇴 했을때 c[4]에서 닉네임 가져오기   ex) Evan'char 님이 파티에서 탈퇴했습니다.
+	if(c[2]==2239 && c[4].indexOf("님이 파티에서 탈퇴했습니다.") !== -1){
+		let outNick = "";
+		//console.log(c[4].indexOf("님이"));
+		let nIndex = c[4].indexOf("님이")-1; // 닉 or 닉+서버
+		let sCheck = c[4].substring(nIndex-3, nIndex); // 서버 or 닉 뒤에3개
+		if(sCheck == "카벙클" || sCheck == "모그리" || sCheck == "초코보" || sCheck == "톤베리") {
+			outNick = c[4].substring(0, nIndex-3);
+		}else {
+			outNick = c[4].substring(0, nIndex);
+		}
+		
+		let trIndex = resultNick.indexOf(outNick);
+		//console.log(trIndex);
+		recentData.splice(trIndex,1);
+		let tableName = document.getElementById("table");
+		let trName = document.getElementById("tr"+trIndex);
+		tableName.removeChild(trName);
+		
+		// 해당 배열 요소 삭제
+		resultNick.splice(trIndex,1);
+		resultServ.splice(trIndex,1);
+	}
+	
+	// 내가 파티 만듬
+	if (c[6] === "021E0014") {
+    	const resultArr = [];
+    	function makeParty() {
+       		return new Promise( async function (resolve, reject) {
+        		for (let i = 0; i < 8; i++) {
+        		//getNickServ 실행해서 닉@서버로 반환
+        			let nickServ = await getNickServ(c, i)
+          			if (nickServ === "NOTHING") {
+           				break;
+          			}
+          			// 닉@서버를 devNick["닉", "서버"]로 분할
+            		let dNick = nickServ.split("@");
+            		// 프프로그 준비
+            		let v2URL = fflogURL + dNick[0] + "/" + dNick[1] + "/KR?zone=33&" + partition11 + "&" + api_key;
+            		let v3URL = fflogURL + dNick[0] + "/" + dNick[1] + "/KR?zone=33&" + partition5 + "&" + api_key;
+            		const fData = await Promise.all([
+            			getFFlogData(v2URL),
+               			getFFlogData(v3URL),
+               			getReport(dNick[0]+"@"+serv_to_kr(dNick[1]))
+           			])
+           			
+            		let sumData = fData[0].concat(fData[1]);
+            		let dbData = fData[2];
+            		let dbLength;
+            		if(dbData === undefined || dbData === null) {
+            			dbLength = 0;
+            		}else {
+            			dbLength = Object.keys(dbData).length;
+            		}
+            		// 영식 난이도별 필터
+            		let totalPercent = [];
+            		for (let j = 69; j < 73; j++) {
+            		totalPercent.push(floorFilter(j, sumData));
+            		}
+            		// resultFFlog에 결과값 push
+            		resultFFlog.push(totalPercent);
+	
+            		let devNick = nickServ.split("@");
+            		let resultData = {
+            			name: dNick[0],
+                		serv: dNick[1],
+                		ramuh: totalPercent[0],
+                		ifrit: totalPercent[1],
+                		idol: totalPercent[2],
+                		shiva: totalPercent[3],
+               			report: dbLength
+        			};
+            		resultArr.push(cloneObject(resultData));
+				}
+        		resolve(resultArr);
+			});
+		}
+		makeParty().then(function (ret) {
+        	//console.log("-----");
+            //console.log(ret);
+            writeHtml(ret);
+		});
+	}	
+});
+startOverlayEvents ( ) ;
+
+
+// 딥카피
+function cloneObject(obj) {
+	return JSON.parse(JSON.stringify(obj));
+}
+// c에서 닉,서버 뽑아오기
+function getNickServ(c,i){
+	return new Promise(function(resolve, reject) {
+		let hexNick = "";
+		let convNick = "";
+		let convServ = "";
+		let korNick = "";
+		if(c[index[i]] === "FF00FFFF") {
+			resolve("NOTHING");
+		} else {
+			let subServ = c[index[i]-1].substring(0,4);
+			convServ = convert_to_serv(subServ);
+			resultServ[i] = convServ;
+			
+		}
+		
+		hexNick += c[index[i]+1].substring(2,4);
+		hexNick += c[index[i]+1].substring(0,2);
+		for(var j=index[i]+2; j<index[i]+10; j++){
+			if(c[j].search("00")!=-1){ // 해당 문자열이 00을 포함하면 문자열 추가 후 break;
+				var cIndex = c[j].lastIndexOf("00"); // 11002233
+				hexNick += textSort(c[j].substring(cIndex+2, cIndex.length));
+				break;
+			}
+			hexNick += textSort(c[j]);
+			
+		}
+		//닉@서버 반환
+		korNick = utf8_hex_string_to_string(hexNick);
+		resultNick[i] = korNick;
+		resolve(korNick+"@"+convServ);
+	});
+}
+
+
+// 닉네임 
+function textSort(text){ // 12345678 -> 78563412 로 sort
+	let sortData = "";
+	for(var k=7; k>=0; k-=2){
+		sortData += text.substring(k-1, k+1);
+	}
+	return sortData;
+}
+
+// 프프로그 원시 데이터
+function getFFlogData(reqURL){
+	return new Promise((resolve, reject) =>{
+		let req = new XMLHttpRequest();
+		req.onreadystatechange = function(){
+			if(req.readyState === req.DONE){
+				let fData = req.response;
+				resolve(fData);
+				
+			}
+		}
+		req.open("GET", reqURL);
+		req.responseType = "json";
+		req.send();
+	});		
+}
+
+// 해당 층의 최대 퍼센트 가져옴
+function floorFilter(id, sumData) {
+	let filterData = sumData.filter(function(e){
+		return e.encounterID == id && e.difficulty == 101
+	});
+	let tempData = filterData.map(function(v) {
+		return v.percentile;
+	});
+	let maxValue = Math.max.apply(null, tempData);
+	let floorValue = Math.floor(maxValue);
+	if(floorValue == -Infinity){
+		return -1;
+	}
+	return floorValue;
+	
+}
+
+function getReport(nsData) {
+	return new Promise((resolve, reject) => {
+		fetch("https://ffxiv-banlist-default-rtdb.firebaseio.com/"+nsData+".json")
+		//.then((response) => response.json()).then((data) => resolve(data));
+		.then((response) => resolve(response.json()))
+	});
+	
+}
+
+function checkDuplicate(array) {
+	if( recentData.length === 0 ) {
+		recentData = cloneObject(array);
+		return array;
+	}
+	let splArr = cloneObject(array)
+	splArr.splice(0, recentData.length);
+
+	recentData = cloneObject(array);
+	return splArr;
+}
+
+function writeHtml(rArr){
+	let cdArr = checkDuplicate(rArr);
+	for(let i=0; i<cdArr.length; i++){
+		let cl = document.getElementById("table").children.length;
+		let tr = document.createElement('tr');
+		tr.id = "tr"+(cl-1);
+		table.appendChild(tr);
+		
+		for(let j=0; j<7; j++){
+			let td = document.createElement('td');
+			
+			switch(j){
+			case 0:
+				td.innerText = cdArr[i].name;
+				break;
+			case 1:
+				td.innerText = serv_to_kr(cdArr[i].serv);
+				break;
+			case 2:
+				td.innerText = cdArr[i].ramuh;
+				break;
+			case 3:
+				td.innerText = cdArr[i].ifrit;
+				break;
+			case 4:
+				td.innerText = cdArr[i].idol;
+				break;
+			case 5:
+				td.innerText = cdArr[i].shiva;
+				break;
+			case 6:
+				td.innerText = cdArr[i].report;
+				break;
+			}
+			
+			td.width = ftdWidth[j];
+			td.style.fontSize = "12px";
+			td.style.magin = "0px auto";
+			td.style.textAlign = "center";
+			tr.appendChild(td);
+		}		
+	}
+	
+		
+}
+
+
+
+// utf-8(hex) -> euc-kr(String)
+function hex_to_byte(hex_str)
+{
+    return parseInt(hex_str, 16);
+}
+
+function utf8_hex_string_to_string(hex_str1) // 이거 호출하셈
+	{
+		let bytes2 = hex_string_to_bytes(hex_str1);
+		let str2 = utf8_bytes_to_string(bytes2);
+		return str2;
+	}
+	
+function hex_string_to_bytes(hex_str)
+{ 
+	let result = [] ;
+    for ( let i = 0; i <hex_str.length; i += 2) {
+        result.push (hex_to_byte (hex_str.substr (i, 2)));
+    }
+    return result;
+}	
+
+function utf8_bytes_to_string(arr)
+{
+    if (arr == null)
+        return null;
+    let result = "";
+    let i;
+    while (i = arr.shift()) {
+        if (i <= 0x7f) {
+            result += String.fromCharCode(i);
+        } else if (i <= 0xdf) { 
+            var c = ((i & 0x1f) << 6);
+            c += arr.shift() & 0x3f;
+            result += String.fromCharCode(c);
+        } else if (i <= 0xe0) { 
+            var c = ((arr.shift () & 0x1f) << 6) | 0x0800;
+            c += arr.shift() & 0x3f;
+            result += String.fromCharCode(c);
+        } else {
+            var c = ((i & 0x0f) << 12);
+            c += (arr.shift() & 0x3f) << 6;
+            c += arr.shift() & 0x3f;
+            result += String.fromCharCode(c);
+        }
+    }
+    return result;
+}
+</script>
+</body>
+</html>
